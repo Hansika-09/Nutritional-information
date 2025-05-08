@@ -1,0 +1,92 @@
+from flask import Flask, render_template, request
+import requests
+
+app = Flask(__name__)
+
+# Nutritional guidelines (simplified for demo purposes)
+NUTRITIONAL_GUIDELINES = {
+    "male": {
+        "adult": {
+            "calories": 2500,
+            "protein": 56,
+            "carbohydrates": 300,
+            "fats": 70,
+            "fiber": 30,
+            "vitamin_c": 90
+        }
+    },
+    "female": {
+        "adult": {
+            "calories": 2000,
+            "protein": 46,
+            "carbohydrates": 260,
+            "fats": 70,
+            "fiber": 25,
+            "vitamin_c": 75
+        }
+    }
+}
+
+# Function to fetch nutritional information of a food item using Nutritionix API
+def get_nutrition(food_item):
+    url = "https://trackapi.nutritionix.com/v2/natural/nutrients"
+    headers = {
+        "x-app-id": "YOUR_APP_ID",
+        "x-app-key": "YOUR_APP_KEY",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "query": food_item,
+        "timezone": "US/Eastern"
+    }
+    response = requests.post(url, json=data, headers=headers)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        return None
+
+# Function to calculate missing nutrients
+def calculate_missing_nutrients(gender, age, total_nutrition):
+    age_group = "adult" if age >= 18 else "child"
+    if gender not in NUTRITIONAL_GUIDELINES or age_group not in NUTRITIONAL_GUIDELINES[gender]:
+        return None
+
+    recommended_intake = NUTRITIONAL_GUIDELINES[gender][age_group]
+    missing_nutrients = {}
+
+    for nutrient, recommended_value in recommended_intake.items():
+        actual_value = total_nutrition.get(nutrient, 0)
+        if actual_value < recommended_value:
+            missing_nutrients[nutrient] = recommended_value - actual_value
+
+    return missing_nutrients
+
+@app.route('/')
+def index():
+    return render_template("index.html")
+
+@app.route('/assess', methods=["POST"])
+def assess():
+    age = int(request.form["age"])
+    gender = request.form["gender"]
+    food_items = request.form["food_items"].split(",")
+
+    total_nutrition = {"calories": 0, "protein": 0, "carbohydrates": 0, "fats": 0, "fiber": 0, "vitamin_c": 0}
+
+    for food_item in food_items:
+        nutrition_data = get_nutrition(food_item.strip())
+        if nutrition_data:
+            for food in nutrition_data["foods"]:
+                total_nutrition["calories"] += food.get("nf_calories", 0)
+                total_nutrition["protein"] += food.get("nf_protein", 0)
+                total_nutrition["carbohydrates"] += food.get("nf_total_carbohydrate", 0)
+                total_nutrition["fats"] += food.get("nf_total_fat", 0)
+                total_nutrition["fiber"] += food.get("nf_dietary_fiber", 0)
+                total_nutrition["vitamin_c"] += food.get("full_nutrients", {}).get("401", 0)  # Vitamin C ID
+
+    missing_nutrients = calculate_missing_nutrients(gender, age, total_nutrition)
+
+    return render_template("results.html", total_nutrition=total_nutrition, missing_nutrients=missing_nutrients)
+
+if __name__ == "__main__":
+    app.run(debug=True)
